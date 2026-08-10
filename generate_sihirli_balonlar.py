@@ -294,8 +294,11 @@ def key_lines():
         out.append(f"uçurtma {i+13}: satır {r+1}, sütun {c+1}")
     return "\n".join(out)
 
-html = ("<!-- Tıkladers — Sihirli Balonlar. Cevap anahtarı:\n" + key_lines() + "\n-->\n"
-        + "\n".join(pages))
+html = ("<!DOCTYPE html>\n<html lang=\"tr\">\n<head>\n<meta charset=\"utf-8\">\n"
+        "<title>Tıkladers — Sihirli Balonlar</title>\n"
+        "<style>body{margin:0;padding:0}</style>\n</head>\n<body>\n"
+        "<!-- Cevap anahtarı:\n" + key_lines() + "\n-->\n"
+        + "\n".join(pages) + "\n</body>\n</html>\n")
 with open("sihirli_balonlar.html", "w", encoding="utf-8") as f:
     f.write(html)
 print("yazıldı: sihirli_balonlar.html", len(html), "bayt")
