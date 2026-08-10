@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Tıkladers — "Sihirli Balonlar" oyunu üretici.
+Tıkladers — "Sihirli Balonlar" oyunu üretici (v2 — katmanlı).
 
-Mekanik: pastel gökyüzü mozaiği (6x7 kare) + balon/uçurtma pencereli şablon
-kartlar. Çocuk pencereyi mat üzerinde kaydırıp hedef karttaki renk
-kombinasyonunu yakalar. Her hedefin matta TAM BİR konumu vardır (tekillik
-betikte doğrulanır).
+Her görsel öğe ayrı bir HTML elemanı olarak üretilir (metinler gerçek metin,
+her balon dilimi / mat karesi / kart ayrı şekil) — Canva içe aktarımında her
+biri ayrı, düzenlenebilir katman olur.
 
-Çıktı: sihirli_balonlar.html — Canva'ya import edilebilen 6 sayfalık A4 seti.
+Mekanik: pastel gökyüzü mozaiği (6x7) + balon/uçurtma pencereli şablonlar.
+Her hedefin matta TAM BİR konumu vardır (tekillik betikte doğrulanır).
 """
 import random
 
-PAGE_W, PAGE_H = 794, 1123          # A4 @96dpi
+PAGE_W, PAGE_H = 794, 1123
 CELL = 100
 COLS, ROWS = 6, 7
 PALETTE = {
@@ -25,10 +25,12 @@ PALETTE = {
     "mercan":  "#FF9AA2",
 }
 COLORS = list(PALETTE.values())
-INK = "#4A4A68"          # ana çizgi rengi
-DASH = "#7FB8E6"         # kesim çizgisi
-BASKET = "#C9A227"       # sepet sarısı-kahve
+INK = "#4A4A68"
+DASH = "#7FB8E6"
+BASKET = "#C9A227"
 BASKET_D = "#8B6F5E"
+HOLE = "#EFEFEF"
+FONT = "'Comic Sans MS','Chalkboard SE','Trebuchet MS',sans-serif"
 
 # ---------------------------------------------------------------- mat üretimi
 def build_mat(seed):
@@ -43,13 +45,11 @@ def build_mat(seed):
     return grid
 
 def pick_targets(grid, rng):
-    # kolay: dikey ikili (üst, alt) — tekil çiftler
     pairs = {}
     for r in range(ROWS - 1):
         for c in range(COLS):
             pairs.setdefault((grid[r][c], grid[r + 1][c]), []).append((r, c))
     uniq_pairs = [k for k, v in pairs.items() if len(v) == 1]
-    # 2x2 blok — tekil dörtlüler
     quads = {}
     for r in range(ROWS - 1):
         for c in range(COLS - 1):
@@ -73,216 +73,262 @@ while True:
 easy_t, med_t, kite_t = res
 print(f"seed={seed}  kolay={len(easy_t)} orta={len(med_t)} ucurtma={len(kite_t)}")
 
-# ---------------------------------------------------------------- svg parçaları
+# ---------------------------------------------------------------- temel öğeler
+def D(x, y, w, h, style, inner=""):
+    return (f'<div style="position:absolute;left:{x:.0f}px;top:{y:.0f}px;'
+            f'width:{w:.0f}px;height:{h:.0f}px;{style}">{inner}</div>')
+
+def SVG(x, y, w, h, body):
+    return (f'<svg xmlns="http://www.w3.org/2000/svg" '
+            f'style="position:absolute;left:{x:.0f}px;top:{y:.0f}px" '
+            f'width="{w:.0f}" height="{h:.0f}" viewBox="0 0 {w:.0f} {h:.0f}">{body}</svg>')
+
+def TXT(x, y, w, size, color, text, weight=800, align="center"):
+    return D(x, y, w, size * 1.6,
+             f'font-size:{size}px;font-weight:{weight};color:{color};'
+             f'text-align:{align};line-height:{size*1.5:.0f}px', text)
+
 def cloud(x, y, s=1.0, op=0.9):
-    return (f'<g transform="translate({x},{y}) scale({s})" fill="#FFFFFF" opacity="{op}">'
-            '<ellipse cx="0" cy="0" rx="46" ry="26"/>'
-            '<ellipse cx="-34" cy="8" rx="30" ry="18"/>'
-            '<ellipse cx="34" cy="8" rx="30" ry="18"/></g>')
+    w, h = 160 * s, 60 * s
+    return SVG(x - w / 2, y - h / 2, w, h,
+               f'<g fill="#FFFFFF" opacity="{op}">'
+               f'<ellipse cx="{80*s}" cy="{26*s}" rx="{46*s}" ry="{26*s}"/>'
+               f'<ellipse cx="{46*s}" cy="{34*s}" rx="{30*s}" ry="{18*s}"/>'
+               f'<ellipse cx="{114*s}" cy="{34*s}" rx="{30*s}" ry="{18*s}"/></g>')
 
-def logo(x=PAGE_W / 2):
-    return (f'<g transform="translate({x},46)">'
-            f'<rect x="-42" y="-30" width="84" height="60" rx="6" fill="#fff" stroke="{INK}" stroke-width="2.5"/>'
-            f'<text y="-10" text-anchor="middle" font-size="16" font-weight="800" fill="{INK}">TIK</text>'
-            f'<text y="7" text-anchor="middle" font-size="16" font-weight="800" fill="#E85D75">-LA-</text>'
-            f'<text y="24" text-anchor="middle" font-size="16" font-weight="800" fill="{INK}">DERS</text>'
-            f'<path d="M 30 14 l 10 12 l 3 -6 l 7 -1 z" fill="{INK}"/></g>')
-
-def sky_defs(pid):
-    return (f'<defs><linearGradient id="sky{pid}" x1="0" y1="0" x2="0" y2="1">'
-            '<stop offset="0" stop-color="#CDE9FF"/><stop offset="0.6" stop-color="#E9F6FF"/>'
-            '<stop offset="1" stop-color="#FFF3F8"/></linearGradient></defs>'
-            f'<rect width="{PAGE_W}" height="{PAGE_H}" fill="url(#sky{pid})"/>')
+def logo(cx=PAGE_W / 2, top=16):
+    out = D(cx - 42, top, 84, 60,
+            f'background:#fff;border:2.5px solid {INK};border-radius:6px')
+    out += TXT(cx - 42, top + 2, 84, 15, INK, "TIK")
+    out += TXT(cx - 42, top + 19, 84, 15, "#E85D75", "-LA-")
+    out += TXT(cx - 42, top + 36, 84, 15, INK, "DERS")
+    out += SVG(cx + 26, top + 40, 26, 26,
+               f'<path d="M 4 2 l 10 12 l 3 -6 l 7 -1 z" fill="{INK}"/>')
+    return out
 
 def face(cx, cy, s=1.0):
-    return (f'<g transform="translate({cx},{cy}) scale({s})">'
-            f'<circle cx="-16" cy="-4" r="4.5" fill="{INK}"/><circle cx="16" cy="-4" r="4.5" fill="{INK}"/>'
-            f'<path d="M -10 8 Q 0 18 10 8" stroke="{INK}" stroke-width="3.5" fill="none" stroke-linecap="round"/>'
-            '<circle cx="-26" cy="6" r="6" fill="#FF9AA2" opacity="0.55"/>'
-            '<circle cx="26" cy="6" r="6" fill="#FF9AA2" opacity="0.55"/></g>')
+    out = SVG(cx - 30 * s, cy - 12 * s, 60 * s, 34 * s,
+              f'<g fill="{INK}"><circle cx="{14*s}" cy="{8*s}" r="{4.5*s}"/>'
+              f'<circle cx="{46*s}" cy="{8*s}" r="{4.5*s}"/></g>'
+              f'<path d="M {20*s} {18*s} Q {30*s} {28*s} {40*s} {18*s}" '
+              f'stroke="{INK}" stroke-width="{3.5*s}" fill="none" stroke-linecap="round"/>')
+    for dx in (-26, 26):
+        out += D(cx + dx * s - 6 * s, cy + 6 * s - 6 * s, 12 * s, 12 * s,
+                 "background:#FF9AA2;border-radius:50%;opacity:0.55")
+    return out
 
-def quad_circle(cx, cy, r, tl, tr, bl, br, sw=3):
-    """4 çeyrekli balon zarfı."""
-    return (f'<g><clipPath id="q{cx}_{cy}_{r}"><circle cx="{cx}" cy="{cy}" r="{r}"/></clipPath>'
-            f'<g clip-path="url(#q{cx}_{cy}_{r})">'
-            f'<rect x="{cx-r}" y="{cy-r}" width="{r}" height="{r}" fill="{tl}"/>'
-            f'<rect x="{cx}" y="{cy-r}" width="{r}" height="{r}" fill="{tr}"/>'
-            f'<rect x="{cx-r}" y="{cy}" width="{r}" height="{r}" fill="{bl}"/>'
-            f'<rect x="{cx}" y="{cy}" width="{r}" height="{r}" fill="{br}"/></g>'
-            f'<circle cx="{cx}" cy="{cy}" r="{r}" fill="none" stroke="{INK}" stroke-width="{sw}"/>'
-            f'<line x1="{cx-r}" y1="{cy}" x2="{cx+r}" y2="{cy}" stroke="{INK}" stroke-width="{sw*0.6}"/>'
-            f'<line x1="{cx}" y1="{cy-r}" x2="{cx}" y2="{cy+r}" stroke="{INK}" stroke-width="{sw*0.6}"/></g>')
-
-def basket(cx, cy, w=44, h=34, sw=3):
-    return (f'<rect x="{cx-w/2}" y="{cy}" width="{w}" height="{h}" rx="7" fill="{BASKET}" '
-            f'stroke="{BASKET_D}" stroke-width="{sw}"/>'
-            f'<line x1="{cx-w/2+8}" y1="{cy+6}" x2="{cx+w/2-8}" y2="{cy+6}" stroke="{BASKET_D}" stroke-width="{sw*0.7}"/>')
-
-def small_balloon(cx, cy, top, bottom, s=1.0):
-    """Kolay hedef: zarf=üst renk, sepet=alt renk."""
-    g = f'<g transform="translate({cx},{cy}) scale({s})">'
-    g += f'<circle cx="0" cy="-38" r="46" fill="{top}" stroke="{INK}" stroke-width="3.5"/>'
-    g += f'<ellipse cx="-16" cy="-54" rx="12" ry="8" fill="#fff" opacity="0.5"/>'
-    g += f'<line x1="-22" y1="2" x2="-17" y2="34" stroke="{INK}" stroke-width="2.5"/>'
-    g += f'<line x1="22" y1="2" x2="17" y2="34" stroke="{INK}" stroke-width="2.5"/>'
-    g += (f'<rect x="-26" y="34" width="52" height="42" rx="8" fill="{bottom}" '
-          f'stroke="{INK}" stroke-width="3.5"/>')
-    g += f'<line x1="-26" y1="48" x2="26" y2="48" stroke="{INK}" stroke-width="2" opacity="0.5"/>'
-    g += '</g>'
-    return g
+QUARTER_PATHS = {
+    "tl": lambda r: f'M {r} {r} L {r} 0 A {r} {r} 0 0 0 0 {r} Z',
+    "tr": lambda r: f'M 0 {r} L 0 0 A {r} {r} 0 0 1 {r} {r} Z',
+    "bl": lambda r: f'M {r} 0 L 0 0 A {r} {r} 0 0 0 {r} {r} Z',
+    "br": lambda r: f'M 0 0 L {r} 0 A {r} {r} 0 0 1 0 {r} Z',
+}
+QUARTER_POS = {"tl": (-1, -1), "tr": (0, -1), "bl": (-1, 0), "br": (0, 0)}
 
 def big_balloon(cx, cy, tl, tr, bl, br, s=1.0, with_face=False):
-    g = f'<g transform="translate({cx},{cy}) scale({s})">'
-    g += quad_circle(0, -30, 62, tl, tr, bl, br, sw=3.5)
-    g += f'<line x1="-34" y1="22" x2="-20" y2="52" stroke="{INK}" stroke-width="2.5"/>'
-    g += f'<line x1="34" y1="22" x2="20" y2="52" stroke="{INK}" stroke-width="2.5"/>'
-    g += basket(0, 52, 48, 34)
+    """Zarf merkezi (cx, cy-30s); her dilim ayrı katman."""
+    r = 62 * s
+    ex, ey = cx, cy - 30 * s
+    out = ""
+    for q, col in zip(("tl", "tr", "bl", "br"), (tl, tr, bl, br)):
+        ox, oy = QUARTER_POS[q]
+        out += SVG(ex + ox * r, ey + oy * r, r, r,
+                   f'<path d="{QUARTER_PATHS[q](r)}" fill="{col}"/>')
+    sw = max(2.5, 3.5 * s)
+    pad = sw + 1
+    box = 2 * r + 2 * pad
+    out += SVG(ex - r - pad, ey - r - pad, box, box,
+               f'<circle cx="{r+pad}" cy="{r+pad}" r="{r}" fill="none" stroke="{INK}" stroke-width="{sw}"/>'
+               f'<line x1="{pad}" y1="{r+pad}" x2="{2*r+pad}" y2="{r+pad}" stroke="{INK}" stroke-width="{sw*0.6}"/>'
+               f'<line x1="{r+pad}" y1="{pad}" x2="{r+pad}" y2="{2*r+pad}" stroke="{INK}" stroke-width="{sw*0.6}"/>')
+    out += SVG(cx - 34 * s, cy + 22 * s, 68 * s, 30 * s,
+               f'<line x1="0" y1="0" x2="{14*s}" y2="{30*s}" stroke="{INK}" stroke-width="{2.5*s}"/>'
+               f'<line x1="{68*s}" y1="0" x2="{54*s}" y2="{30*s}" stroke="{INK}" stroke-width="{2.5*s}"/>')
+    out += D(cx - 24 * s, cy + 52 * s, 48 * s, 34 * s,
+             f'background:{BASKET};border:{max(2, 3*s):.0f}px solid {BASKET_D};'
+             f'border-radius:{7*s:.0f}px')
     if with_face:
-        g += face(0, -30, 1.0)
-    g += '</g>'
-    return g
+        out += face(ex, ey, s * 0.9)
+    return out
+
+def small_balloon(cx, cy, top, bottom, s=1.0):
+    out = D(cx - 46 * s, cy - 84 * s, 92 * s, 92 * s,
+            f'background:{top};border:{max(2.5, 3.5*s):.1f}px solid {INK};border-radius:50%')
+    out += D(cx - 28 * s, cy - 62 * s, 24 * s, 16 * s,
+             "background:#fff;border-radius:50%;opacity:0.5")
+    out += SVG(cx - 22 * s, cy + 2 * s, 44 * s, 32 * s,
+               f'<line x1="0" y1="0" x2="{5*s}" y2="{32*s}" stroke="{INK}" stroke-width="{2.5*s}"/>'
+               f'<line x1="{44*s}" y1="0" x2="{39*s}" y2="{32*s}" stroke="{INK}" stroke-width="{2.5*s}"/>')
+    out += D(cx - 26 * s, cy + 34 * s, 52 * s, 42 * s,
+             f'background:{bottom};border:{max(2.5, 3.5*s):.1f}px solid {INK};'
+             f'border-radius:{8*s:.0f}px')
+    return out
+
+KITE_PATHS = {
+    "tl": lambda r: f'M {r} 0 L {r} {r} L 0 {r} Z',
+    "tr": lambda r: f'M 0 0 L {r} {r} L 0 {r} Z',
+    "bl": lambda r: f'M 0 0 L {r} 0 L {r} {r} Z',
+    "br": lambda r: f'M 0 0 L {r} 0 L 0 {r} Z',
+}
 
 def kite(cx, cy, tl, tr, bl, br, s=1.0):
-    g = f'<g transform="translate({cx},{cy}) scale({s})">'
-    g += (f'<path d="M 0 -62 L 62 0 L 0 62 L -62 0 Z" fill="#fff"/>'
-          f'<path d="M 0 -62 L 0 0 L -62 0 Z" fill="{tl}"/>'
-          f'<path d="M 0 -62 L 62 0 L 0 0 Z" fill="{tr}"/>'
-          f'<path d="M -62 0 L 0 0 L 0 62 Z" fill="{bl}"/>'
-          f'<path d="M 0 0 L 62 0 L 0 62 Z" fill="{br}"/>'
-          f'<path d="M 0 -62 L 62 0 L 0 62 L -62 0 Z" fill="none" stroke="{INK}" stroke-width="3.5"/>'
-          f'<line x1="0" y1="-62" x2="0" y2="62" stroke="{INK}" stroke-width="2"/>'
-          f'<line x1="-62" y1="0" x2="62" y2="0" stroke="{INK}" stroke-width="2"/>')
-    g += (f'<path d="M 0 62 Q 14 84 4 102" stroke="{INK}" stroke-width="2.5" fill="none"/>'
-          f'<path d="M 8 80 l 8 -6 l 0 12 z" fill="#FF9AA2" stroke="{INK}" stroke-width="1.5"/>'
-          f'<path d="M 2 98 l 8 -6 l 0 12 z" fill="#A3D8F4" stroke="{INK}" stroke-width="1.5"/>')
-    g += '</g>'
-    return g
+    r = 62 * s
+    out = ""
+    for q, col in zip(("tl", "tr", "bl", "br"), (tl, tr, bl, br)):
+        ox, oy = QUARTER_POS[q]
+        out += SVG(cx + ox * r, cy + oy * r, r, r,
+                   f'<path d="{KITE_PATHS[q](r)}" fill="{col}"/>')
+    sw = max(2.5, 3.5 * s)
+    pad = sw + 1
+    box = 2 * r + 2 * pad
+    out += SVG(cx - r - pad, cy - r - pad, box, box,
+               f'<path d="M {r+pad} {pad} L {2*r+pad} {r+pad} L {r+pad} {2*r+pad} L {pad} {r+pad} Z" '
+               f'fill="none" stroke="{INK}" stroke-width="{sw}"/>'
+               f'<line x1="{r+pad}" y1="{pad}" x2="{r+pad}" y2="{2*r+pad}" stroke="{INK}" stroke-width="{sw*0.55}"/>'
+               f'<line x1="{pad}" y1="{r+pad}" x2="{2*r+pad}" y2="{r+pad}" stroke="{INK}" stroke-width="{sw*0.55}"/>')
+    out += SVG(cx - 5 * s, cy + r, 30 * s, 44 * s,
+               f'<path d="M {5*s} 0 Q {19*s} {22*s} {9*s} {40*s}" stroke="{INK}" '
+               f'stroke-width="{2.5*s}" fill="none"/>')
+    out += SVG(cx + 6 * s, cy + r + 10 * s, 12 * s, 10 * s,
+               f'<path d="M 0 {8*s} l {10*s} -{8*s} l 0 {10*s} z" fill="#FF9AA2" '
+               f'stroke="{INK}" stroke-width="1.5"/>')
+    out += SVG(cx + 0 * s, cy + r + 28 * s, 12 * s, 10 * s,
+               f'<path d="M 0 {8*s} l {10*s} -{8*s} l 0 {10*s} z" fill="#A3D8F4" '
+               f'stroke="{INK}" stroke-width="1.5"/>')
+    return out
 
-def card(x, y, w, h, inner, num=None, num_color="#E85D75"):
-    g = (f'<g transform="translate({x},{y})">'
-         f'<rect x="-8" y="-8" width="{w+16}" height="{h+16}" rx="18" fill="none" '
-         f'stroke="{DASH}" stroke-width="2.5" stroke-dasharray="9 7"/>'
-         f'<rect width="{w}" height="{h}" rx="14" fill="#FFFFFF" stroke="{INK}" stroke-width="2"/>' )
-    g += inner
-    if num is not None:
-        g += (f'<circle cx="30" cy="30" r="19" fill="{num_color}"/>'
-              f'<text x="30" y="37" text-anchor="middle" font-size="20" font-weight="800" fill="#fff">{num}</text>')
-    g += '</g>'
-    return g
+def card_frame(x, y, w, h):
+    out = D(x - 8, y - 8, w + 16, h + 16,
+            f'border:2.5px dashed {DASH};border-radius:18px')
+    out += D(x, y, w, h, f'background:#FFFFFF;border:2px solid {INK};border-radius:14px')
+    return out
+
+def badge(x, y, num, color):
+    return D(x, y, 38, 38,
+             f'background:{color};border-radius:50%;color:#fff;font-size:20px;'
+             'font-weight:800;text-align:center;line-height:38px', str(num))
 
 def scissors(x, y):
-    return (f'<g transform="translate({x},{y})" stroke="{INK}" stroke-width="2" fill="none">'
-            '<circle cx="-8" cy="6" r="4"/><circle cx="-8" cy="-6" r="4"/>'
-            '<line x1="-5" y1="4" x2="12" y2="-7"/><line x1="-5" y1="-4" x2="12" y2="7"/></g>')
+    return SVG(x - 14, y - 11, 28, 22,
+               f'<g stroke="{INK}" stroke-width="2" fill="none">'
+               '<circle cx="6" cy="17" r="4"/><circle cx="6" cy="5" r="4"/>'
+               '<line x1="9" y1="15" x2="26" y2="4"/><line x1="9" y1="7" x2="26" y2="18"/></g>')
 
-FONT = "font-family=\"'Comic Sans MS','Chalkboard SE','Trebuchet MS',sans-serif\""
-
-def svg_page(pid, body, label):
+def page(pid, label, elements):
     return (f'<div data-document-role="page" data-label="{label}" '
-            f'style="width:{PAGE_W}px;height:{PAGE_H}px;overflow:hidden">'
-            f'<svg xmlns="http://www.w3.org/2000/svg" width="{PAGE_W}" height="{PAGE_H}" '
-            f'viewBox="0 0 {PAGE_W} {PAGE_H}" {FONT}>{sky_defs(pid)}{body}</svg></div>')
+            f'style="position:relative;width:{PAGE_W}px;height:{PAGE_H}px;'
+            f'overflow:hidden;font-family:{FONT}">'
+            + "".join(elements) + '</div>')
+
+def sky():
+    return D(0, 0, PAGE_W, PAGE_H,
+             "background:linear-gradient(180deg,#CDE9FF 0%,#E9F6FF 60%,#FFF3F8 100%)")
 
 pages = []
 
 # ------------------------------------------------------------------ 1. kapak
-b = logo()
-b += cloud(120, 200, 1.2) + cloud(660, 260, 1.0, 0.8) + cloud(90, 640, 0.9, 0.8) + cloud(700, 700, 1.3)
-b += f'<text x="{PAGE_W/2}" y="175" text-anchor="middle" font-size="64" font-weight="800" fill="{INK}">Sihirli Balonlar</text>'
-b += f'<text x="{PAGE_W/2}" y="220" text-anchor="middle" font-size="26" fill="#E85D75" font-weight="700">Kes &#8226; Kaydır &#8226; Eşleştir</text>'
-b += big_balloon(PAGE_W / 2, 560, PALETTE["pembe"], PALETTE["mavi"], PALETTE["sari"], PALETTE["mint"], s=3.2, with_face=True)
-b += kite(160, 900, PALETTE["mercan"], PALETTE["sari"], PALETTE["mavi"], PALETTE["lila"], s=0.8)
-b += small_balloon(650, 900, PALETTE["lila"], PALETTE["seftali"], s=0.9)
-b += (f'<rect x="{PAGE_W/2-150}" y="1020" width="300" height="52" rx="26" fill="#fff" stroke="{INK}" stroke-width="2.5"/>'
-      f'<text x="{PAGE_W/2}" y="1054" text-anchor="middle" font-size="24" font-weight="700" fill="{INK}">3 - 8 yaş</text>')
-pages.append(svg_page(1, b, "Kapak"))
+els = [sky(), logo()]
+els += [cloud(120, 200, 1.2), cloud(660, 260, 1.0, 0.8),
+        cloud(90, 640, 0.9, 0.8), cloud(700, 700, 1.3)]
+els.append(TXT(0, 120, PAGE_W, 60, INK, "Sihirli Balonlar"))
+els.append(TXT(0, 196, PAGE_W, 25, "#E85D75", "Kes &#8226; Kaydır &#8226; Eşleştir", 700))
+els.append(big_balloon(PAGE_W / 2, 560, PALETTE["pembe"], PALETTE["mavi"],
+                       PALETTE["sari"], PALETTE["mint"], s=3.2, with_face=True))
+els.append(kite(160, 880, PALETTE["mercan"], PALETTE["sari"],
+                PALETTE["mavi"], PALETTE["lila"], s=0.8))
+els.append(small_balloon(650, 900, PALETTE["lila"], PALETTE["seftali"], s=0.9))
+els.append(D(PAGE_W / 2 - 150, 1020, 300, 52,
+             f'background:#fff;border:2.5px solid {INK};border-radius:26px'))
+els.append(TXT(PAGE_W / 2 - 150, 1030, 300, 23, INK, "3 - 8 yaş", 700))
+pages.append(page(1, "Kapak", els))
 
 # ------------------------------------------------------------------ 2. mat
-b = logo()
+els = [sky(), logo()]
+els.append(TXT(0, 92, PAGE_W, 29, INK, "Gökyüzü Matı"))
 mx, my = (PAGE_W - COLS * CELL) / 2, 150
-b += f'<text x="{PAGE_W/2}" y="120" text-anchor="middle" font-size="30" font-weight="800" fill="{INK}">Gökyüzü Matı</text>'
-b += (f'<rect x="{mx-16}" y="{my-16}" width="{COLS*CELL+32}" height="{ROWS*CELL+32}" rx="20" '
-      f'fill="#FFFFFF" stroke="{INK}" stroke-width="3"/>')
+els.append(D(mx - 16, my - 16, COLS * CELL + 32, ROWS * CELL + 32,
+             f'background:#FFFFFF;border:3px solid {INK};border-radius:20px'))
 for r in range(ROWS):
     for c in range(COLS):
-        b += (f'<rect x="{mx+c*CELL+2}" y="{my+r*CELL+2}" width="{CELL-4}" height="{CELL-4}" '
-              f'rx="10" fill="{grid[r][c]}"/>')
-b += cloud(90, 1010, 0.8, 0.9) + cloud(700, 1030, 1.0, 0.9)
-b += (f'<text x="{PAGE_W/2}" y="1040" text-anchor="middle" font-size="20" fill="{INK}">'
-      'Bu sayfayı kesmeyin — pencereyi üzerinde kaydırın!</text>')
-pages.append(svg_page(2, b, "Gökyüzü Matı"))
+        els.append(D(mx + c * CELL + 2, my + r * CELL + 2, CELL - 4, CELL - 4,
+                     f'background:{grid[r][c]};border-radius:10px'))
+els += [cloud(90, 1010, 0.8), cloud(700, 1030, 1.0)]
+els.append(TXT(0, 1016, PAGE_W, 19, INK,
+               "Bu sayfayı kesmeyin — pencereyi üzerinde kaydırın!", 600))
+pages.append(page(2, "Gökyüzü Matı", els))
 
 # ------------------------------------------------------------------ 3. pencereler
-b = logo()
-b += f'<text x="{PAGE_W/2}" y="120" text-anchor="middle" font-size="30" font-weight="800" fill="{INK}">Sihirli Pencereler</text>'
-HOLE = "#EFEFEF"
-# küçük balon penceresi
-inner = f'<text x="110" y="36" text-anchor="middle" font-size="18" font-weight="700" fill="{INK}">Küçük Balon</text>'
-inner += f'<circle cx="110" cy="120" r="50" fill="{HOLE}" stroke="#999" stroke-width="2" stroke-dasharray="6 5"/>'
-inner += f'<line x1="85" y1="163" x2="90" y2="185" stroke="{INK}" stroke-width="2.5"/>'
-inner += f'<line x1="135" y1="163" x2="130" y2="185" stroke="{INK}" stroke-width="2.5"/>'
-inner += f'<rect x="75" y="190" width="70" height="60" rx="8" fill="{HOLE}" stroke="#999" stroke-width="2" stroke-dasharray="6 5"/>'
-inner += scissors(110, 120) + scissors(110, 220)
-c1 = card(70, 170, 220, 280, inner)
-# büyük balon penceresi
-inner = f'<text x="145" y="36" text-anchor="middle" font-size="18" font-weight="700" fill="{INK}">Büyük Balon</text>'
-inner += f'<circle cx="145" cy="150" r="100" fill="{HOLE}" stroke="#999" stroke-width="2" stroke-dasharray="6 5"/>'
-inner += f'<line x1="95" y1="237" x2="115" y2="262" stroke="{INK}" stroke-width="2.5"/>'
-inner += f'<line x1="195" y1="237" x2="175" y2="262" stroke="{INK}" stroke-width="2.5"/>'
-inner += basket(145, 258, 56, 30)
-inner += scissors(145, 150)
-c2 = card(330, 170, 290, 310, inner)
-# uçurtma penceresi
-inner = f'<text x="145" y="36" text-anchor="middle" font-size="18" font-weight="700" fill="{INK}">Uçurtma</text>'
-inner += (f'<path d="M 145 55 L 245 155 L 145 255 L 45 155 Z" fill="{HOLE}" '
-          'stroke="#999" stroke-width="2" stroke-dasharray="6 5"/>')
-inner += scissors(145, 155)
-c3 = card(70, 530, 290, 290, inner)
-b += c1 + c2 + c3
+els = [sky(), logo()]
+els.append(TXT(0, 92, PAGE_W, 29, INK, "Sihirli Pencereler"))
+# küçük balon penceresi — kart (70,170) 220x280
+els.append(card_frame(70, 170, 220, 280))
+els.append(TXT(70, 190, 220, 17, INK, "Küçük Balon", 700))
+els.append(D(70 + 60, 170 + 70, 100, 100,
+             f'background:{HOLE};border:2px dashed #999;border-radius:50%'))
+els.append(SVG(70 + 85, 170 + 163, 50, 27,
+               f'<line x1="0" y1="0" x2="5" y2="27" stroke="{INK}" stroke-width="2.5"/>'
+               f'<line x1="50" y1="0" x2="45" y2="27" stroke="{INK}" stroke-width="2.5"/>'))
+els.append(D(70 + 75, 170 + 190, 70, 60,
+             f'background:{HOLE};border:2px dashed #999;border-radius:8px'))
+els.append(scissors(70 + 110, 170 + 120))
+els.append(scissors(70 + 110, 170 + 220))
+# büyük balon penceresi — kart (330,170) 290x310
+els.append(card_frame(330, 170, 290, 310))
+els.append(TXT(330, 190, 290, 17, INK, "Büyük Balon", 700))
+els.append(D(330 + 45, 170 + 50, 200, 200,
+             f'background:{HOLE};border:2px dashed #999;border-radius:50%'))
+els.append(SVG(330 + 95, 170 + 237, 100, 25,
+               f'<line x1="0" y1="0" x2="20" y2="25" stroke="{INK}" stroke-width="2.5"/>'
+               f'<line x1="100" y1="0" x2="80" y2="25" stroke="{INK}" stroke-width="2.5"/>'))
+els.append(D(330 + 117, 170 + 258, 56, 30,
+             f'background:{BASKET};border:2.5px solid {BASKET_D};border-radius:7px'))
+els.append(scissors(330 + 145, 170 + 150))
+# uçurtma penceresi — kart (70,530) 290x290
+els.append(card_frame(70, 530, 290, 290))
+els.append(TXT(70, 550, 290, 17, INK, "Uçurtma", 700))
+els.append(SVG(70 + 45, 530 + 55, 200, 200,
+               f'<path d="M 100 0 L 200 100 L 100 200 L 0 100 Z" fill="{HOLE}" '
+               'stroke="#999" stroke-width="2" stroke-dasharray="6 5"/>'))
+els.append(scissors(70 + 145, 530 + 155))
 # yönerge
 steps = [("1", "Gri pencereleri kesin"),
          ("2", "Matın üzerinde kaydırın"),
          ("3", "Hedef renkleri yakalayın!")]
-sy = 560
 for i, (n, t) in enumerate(steps):
-    y = sy + i * 78
-    b += (f'<circle cx="425" cy="{y}" r="24" fill="#E85D75"/>'
-          f'<text x="425" y="{y+8}" text-anchor="middle" font-size="22" font-weight="800" fill="#fff">{n}</text>'
-          f'<text x="462" y="{y+8}" font-size="20" font-weight="600" fill="{INK}">{t}</text>')
-b += cloud(680, 950, 0.9) + small_balloon(160, 960, PALETTE["mint"], PALETTE["pembe"], 0.75)
-pages.append(svg_page(3, b, "Pencereler ve Yönerge"))
+    y = 560 + i * 78
+    els.append(D(401, y - 24, 48, 48,
+                 "background:#E85D75;border-radius:50%;color:#fff;font-size:22px;"
+                 "font-weight:800;text-align:center;line-height:48px", n))
+    els.append(TXT(462, y - 15, 280, 20, INK, t, 600, "left"))
+els.append(cloud(680, 950, 0.9))
+els.append(small_balloon(160, 960, PALETTE["mint"], PALETTE["pembe"], 0.75))
+pages.append(page(3, "Pencereler ve Yönerge", els))
 
 # ------------------------------------------------------------------ hedef sayfaları
-def target_page(pid, title, items, draw, label, start_num, num_color):
-    b = logo()
-    b += f'<text x="{PAGE_W/2}" y="120" text-anchor="middle" font-size="30" font-weight="800" fill="{INK}">{title}</text>'
+def target_page(pid, title, items, kind, label, start_num, num_color):
+    els = [sky(), logo()]
+    els.append(TXT(0, 92, PAGE_W, 29, INK, title))
     CW, CH = 300, 280
     gx, gy = (PAGE_W - 2 * CW - 60) / 2, 160
     for i, (colors, pos) in enumerate(items):
         col, row = i % 2, i // 2
         x = gx + col * (CW + 60)
         y = gy + row * (CH + 40)
-        inner = draw(colors, CW, CH)
-        b += card(x, y, CW, CH, inner, num=start_num + i, num_color=num_color)
-    return svg_page(pid, b, label)
+        els.append(card_frame(x, y, CW, CH))
+        if kind == "easy":
+            els.append(small_balloon(x + CW / 2, y + CH / 2 + 10, colors[0], colors[1], 1.15))
+        elif kind == "med":
+            els.append(big_balloon(x + CW / 2, y + CH / 2 + 6, *colors, s=1.25))
+        else:
+            els.append(kite(x + CW / 2, y + CH / 2 - 20, *colors, s=1.0))
+        els.append(badge(x + 11, y + 11, start_num + i, num_color))
+    return page(pid, label, els)
 
-def draw_easy(colors, w, h):
-    top, bottom = colors
-    return small_balloon(w / 2, h / 2 + 10, top, bottom, 1.15)
+pages.append(target_page(4, "Küçük Balonları Bul", easy_t, "easy", "Kolay Hedefler", 1, "#5BB98C"))
+pages.append(target_page(5, "Büyük Balonları Bul", med_t, "med", "Orta Hedefler", 7, "#E8A33D"))
+pages.append(target_page(6, "Uçurtmaları Bul", kite_t, "kite", "Uçurtma Hedefleri", 13, "#E85D75"))
 
-def draw_med(colors, w, h):
-    tl, tr, bl, br = colors
-    return big_balloon(w / 2, h / 2 + 6, tl, tr, bl, br, 1.25)
-
-def draw_kite(colors, w, h):
-    tl, tr, bl, br = colors
-    return kite(w / 2, h / 2 - 20, tl, tr, bl, br, 1.0)
-
-pages.append(target_page(4, "Küçük Balonları Bul", easy_t, draw_easy, "Kolay Hedefler", 1, "#5BB98C"))
-pages.append(target_page(5, "Büyük Balonları Bul", med_t, draw_med, "Orta Hedefler", 7, "#E8A33D"))
-pages.append(target_page(6, "Uçurtmaları Bul", kite_t, draw_kite, "Uçurtma Hedefleri", 13, "#E85D75"))
-
-# ------------------------------------------------------------------ cevap anahtarı (yorum olarak)
+# ------------------------------------------------------------------ çıktı
 def key_lines():
     inv = {v: k for k, v in PALETTE.items()}
     out = []
