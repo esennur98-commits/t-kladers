@@ -1,0 +1,6 @@
+# Kişisel veri: DM geçmişi, aday havuzu, jetonlar — ASLA repoya girmez
+veri/
+*.env
+.env*
+__pycache__/
+*.pyc

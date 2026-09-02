@@ -1,0 +1,69 @@
+{
+  "_aciklama": "Tıkladers influencer keşif kriterleri. Sayıları serbestçe değiştir; kod bu dosyayı okur.",
+
+  "takipci": {
+    "min": 10000,
+    "max": 50000,
+    "ideal_min": 15000,
+    "ideal_max": 35000
+  },
+
+  "etkilesim_orani": {
+    "_birim": "yüzde — (ort. beğeni + ort. yorum) / takipçi * 100",
+    "min": 1.0,
+    "ideal": 3.5
+  },
+
+  "aktiflik": {
+    "son_paylasim_gun_limit": 21,
+    "ideal_gonderi_30gun": 8
+  },
+
+  "sponsor": {
+    "_aciklama": "Son gönderilerin ne kadarı reklam/işbirliği. Çok yüksekse hesap doygun.",
+    "uyari_orani": 0.4,
+    "eleme_orani": 0.7
+  },
+
+  "agirliklar": {
+    "takipci": 20,
+    "etkilesim": 25,
+    "icerik": 18,
+    "yas_uyumu": 12,
+    "video": 10,
+    "aktiflik": 8,
+    "benzerlik": 15
+  },
+
+  "anahtar_kelimeler": {
+    "anne": ["anne", "annelik", "iki çocuk", "2 çocuk", "kızım", "oğlum", "kızı", "oğlu",
+             "bebek", "çocuk", "kardeş", "evde anne", "çalışan anne", "anne blog"],
+    "egitim": ["etkinlik", "oyun", "eğitici", "eğitim", "montessori", "okul öncesi",
+               "anasınıfı", "atölye", "duyu", "duyusal", "ince motor", "el becerisi",
+               "kes yap", "boyama", "aktivite", "öğreniyor", "öğretici", "diy",
+               "evde etkinlik", "oyuncak", "kitap", "masal", "gelişim"],
+    "yas_2_8": ["2 yaş", "3 yaş", "4 yaş", "5 yaş", "6 yaş", "7 yaş", "8 yaş",
+                "iki yaş", "üç yaş", "dört yaş", "beş yaş", "altı yaş",
+                "okul öncesi", "anasınıfı", "kreş", "ilkokul", "1. sınıf", "2. sınıf",
+                "24 ay", "30 ay", "36 ay", "48 ay", "aylık"],
+    "sponsor": ["işbirliği", "iş birliği", "reklam", "sponsorlu", "hediyem",
+                "collab", "ad ", "#reklam", "#işbirliği", "indirim kodu", "kodum"],
+    "olumsuz": ["satış", "mağaza", "sipariş", "toptan", "kargo ücretsiz", "butik",
+                "estetik", "dolgu", "kripto", "bahis", "yatırım", "diyet ürünü",
+                "shop", "store", "sipariş için dm"]
+  },
+
+  "yas_2_8_disi": ["hamile", "gebelik", "yeni doğan", "0-6 ay", "emzirme", "lohusa",
+                   "ergen", "lise", "üniversite", "8. sınıf", "lgs", "yks"],
+
+  "gunluk": {
+    "hedef_kisi": 50,
+    "min_puan": 45
+  },
+
+  "graph": {
+    "surum": "v21.0",
+    "istekler_arasi_bekleme_sn": 1.2,
+    "son_gonderi_adedi": 12
+  }
+}
