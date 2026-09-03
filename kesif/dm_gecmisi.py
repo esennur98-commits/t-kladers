@@ -14,6 +14,7 @@ kendi verini okuruz.
 import json
 import os
 import re
+from html.parser import HTMLParser
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
 
@@ -34,27 +35,162 @@ def _mesaj_dosyalari(kok):
         if "inbox" not in dizin.replace("\\", "/").split("/"):
             continue
         for d in dosyalar:
-            if re.fullmatch(r"message_\d+\.json", d):
+            if re.fullmatch(r"message_\d+\.(json|html)", d):
                 bulunan.append(os.path.join(dizin, d))
     return sorted(bulunan)
 
 
 def _kullanici_adi_cikar(dosya_yolu, baslik):
     """
-    Klasör adı genelde "kullaniciadi_17843968..." biçiminde olur; sondaki
-    sayı bloğunu atınca kullanıcı adı kalır. Olmazsa başlıktan türetiriz.
+    Klasör adı "kullaniciadi_17843968..." biçimindedir; JSON export'ta nokta/alt
+    çizgi korunur, HTML export'ta atılır. Başlık (görünen ad) noktalarından
+    arındırılınca klasör adıyla örtüşüyorsa başlık gerçek kullanıcı adıdır;
+    örtüşmüyorsa klasör adı (noktasız, yaklaşık) kullanılır.
     """
     klasor = os.path.basename(os.path.dirname(dosya_yolu))
-    ad = re.sub(r"_\d{6,}$", "", klasor)
-    if ad and re.fullmatch(r"[A-Za-z0-9._]+", ad):
-        return ortak.kullanici_normalize(ad)
+    slug = ortak.kucuk(re.sub(r"_\d{6,}$", "", klasor))
+    b = ortak.kucuk((baslik or "").strip())
+    if b and re.fullmatch(r"[a-z0-9._]{2,30}", b) and re.sub(r"[._]", "", b) == slug:
+        return b
+    if slug and re.fullmatch(r"[a-z0-9._]+", slug):
+        return slug
     return ortak.kullanici_normalize(re.sub(r"[^A-Za-z0-9._]", "", baslik or ""))
+
+
+SILINMIS = {"instagramkullanicisi", "instagramuser", "instagram kullanıcısı"}
+
+
+# ------------------------------------------------------------ HTML biçimi
+_AYLAR = {"oca": 1, "şub": 2, "sub": 2, "mar": 3, "nis": 4, "may": 5, "haz": 6,
+          "tem": 7, "ağu": 8, "agu": 8, "eyl": 9, "eki": 10, "kas": 11, "ara": 12,
+          "jan": 1, "feb": 2, "apr": 4, "jun": 6, "jul": 7, "aug": 8, "sep": 9,
+          "oct": 10, "nov": 11, "dec": 12}
+_VOID = {"img", "br", "hr", "input", "meta", "link", "source"}
+
+
+def _html_tarih(metin):
+    """'Haz 18, 2026 6:57 am' → datetime (UTC varsayılır)."""
+    m = re.match(r"\s*([A-Za-zÇĞİÖŞÜçğıöşü]+)\s+(\d+),\s+(\d{4})\s+(\d+):(\d+)\s*(am|pm)?",
+                 metin or "", re.I)
+    if not m:
+        return None
+    ay = _AYLAR.get(ortak.kucuk(m.group(1))[:3])
+    if not ay:
+        return None
+    saat = int(m.group(4)) % 12
+    if (m.group(6) or "").lower() == "pm":
+        saat += 12
+    try:
+        return datetime(int(m.group(3)), ay, int(m.group(2)), saat, int(m.group(5)),
+                        tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
+class _IGHtml(HTMLParser):
+    """Instagram HTML export'undaki mesaj kutularını (_a6-g) toplar."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.yigin = []          # [(tag, alan)]  alan: 'h' gönderen, 'p' içerik, 'o' zaman, 'x' atla
+        self.baslik = None
+        self.basliklar = []
+        self.mesajlar = []
+        self.suanki = None
+        self._h1 = False
+
+    def handle_starttag(self, tag, attrs):
+        if tag in _VOID:
+            return
+        cls = dict(attrs).get("class", "") or ""
+        alan = None
+        if "_a6-g" in cls:
+            self.suanki = {"kim": [], "metin": [], "zaman": []}
+            alan = "g"
+        elif "_a6-h" in cls:
+            alan = "h"
+        elif "_a6-p" in cls:
+            alan = "p"
+        elif "_a6-o" in cls:
+            alan = "o"
+        elif "_a6-q" in cls:     # tepkiler listesi — içerik değil
+            alan = "x"
+        if tag == "h1":
+            self._h1 = True
+        self.yigin.append((tag, alan))
+
+    def handle_endtag(self, tag):
+        if tag in _VOID:
+            return
+        if tag == "h1":
+            self._h1 = False
+        while self.yigin:
+            t, alan = self.yigin.pop()
+            if alan == "g" and self.suanki is not None:
+                m = self.suanki
+                self.mesajlar.append({
+                    "kim": " ".join(m["kim"]).strip(),
+                    "metin": " ".join(x for x in m["metin"] if x).strip(),
+                    "zaman": _html_tarih(" ".join(m["zaman"])),
+                })
+                self.suanki = None
+            if t == tag:
+                break
+
+    def handle_data(self, veri):
+        veri = veri.strip()
+        if not veri:
+            return
+        if self._h1 and self.baslik is None:
+            self.baslik = veri
+        if self.suanki is None:
+            return
+        for _, alan in reversed(self.yigin):
+            if alan == "x":
+                return
+            if alan == "h":
+                self.suanki["kim"].append(veri); return
+            if alan == "p":
+                self.suanki["metin"].append(veri); return
+            if alan == "o":
+                self.suanki["zaman"].append(veri); return
+            if alan == "g":
+                return
+
+
+def _html_sohbet_oku(yol):
+    """Tek bir message_N.html dosyasını sözlüğe çevir (grup ise None)."""
+    try:
+        with open(yol, encoding="utf-8", errors="replace") as f:
+            p = _IGHtml()
+            p.feed(f.read())
+    except OSError:
+        return None
+    mesajlar = [m for m in p.mesajlar if m["zaman"] and m["kim"]]
+    if not mesajlar:
+        return None
+    katilimcilar = sorted({m["kim"] for m in mesajlar})
+    if len(katilimcilar) > 2:
+        return None
+    mesajlar.sort(key=lambda m: m["zaman"])
+    baslik = p.baslik or katilimcilar[0]
+    return {
+        "kullanici_adi": _kullanici_adi_cikar(yol, baslik),
+        "ad": baslik,
+        "katilimcilar": katilimcilar,
+        "mesajlar": mesajlar,
+    }
 
 
 def _sohbetleri_oku(kok):
     """Her ikili sohbeti (thread) normalize edilmiş sözlük olarak döndür."""
     sohbetler = []
     for yol in _mesaj_dosyalari(kok):
+        if yol.endswith(".html"):
+            s = _html_sohbet_oku(yol)
+            if s:
+                sohbetler.append(s)
+            continue
         try:
             with open(yol, encoding="utf-8") as f:
                 ham = json.load(f)
@@ -106,11 +242,21 @@ def analiz_et(export_kok, ben=None):
     for s in sohbetler:
         bizim = [m for m in s["mesajlar"] if m["kim"] == ben]
         onlarin = [m for m in s["mesajlar"] if m["kim"] != ben]
-        if not bizim:
-            continue  # biz hiç yazmamışız: gelen kutusu trafiği, keşif verisi değil
+        if not bizim or s["kullanici_adi"] in SILINMIS:
+            continue  # biz hiç yazmamışız ya da hesap silinmiş
+        ilk = s["mesajlar"][0]
+        reklam_yaniti = bool(re.search(r"replied to an ad|reklam(a|ınıza) yanıt", ilk["metin"], re.I))
+        biz_basladik = ilk["kim"] == ben and not reklam_yaniti
         ilk_bizim = bizim[0]
-        tum_metin = " ".join(m["metin"] for m in s["mesajlar"])
-        iz_sayisi, _ = ortak.kelime_sayisi(tum_metin, ISBIRLIGI_IZLERI)
+        # Açılış = karşı taraf ilk kez cevap verene kadar attığımız mesajların tümü
+        # (şablonlar çoğu zaman 3-4 ayrı balon; aynı dakikada sıralama güvenilmez)
+        ilk_cevap = onlarin[0]["zaman"] if onlarin else None
+        acilis = " ".join(m["metin"] for m in bizim
+                          if ilk_cevap is None or m["zaman"] <= ilk_cevap)
+        # İşbirliği izi yalnızca KARŞI TARAFIN yazdıklarında aranır; kendi
+        # şablonumuzdaki "link / indirim kodu" kelimeleri sayılmaz.
+        onlarin_metin = " ".join(m["metin"] for m in onlarin)
+        iz_sayisi, _ = ortak.kelime_sayisi(onlarin_metin, ISBIRLIGI_IZLERI)
         kayitlar.append({
             "kullanici_adi": s["kullanici_adi"],
             "ad": s["ad"],
@@ -120,9 +266,12 @@ def analiz_et(export_kok, ben=None):
             "onlarin_mesaj": len(onlarin),
             "cevap_verdi": "evet" if onlarin else "hayır",
             "ortak_video": "",
-            "kaynak": "dm_export",
+            "kaynak": "dm_export" if biz_basladik else "gelen_kutusu",
             "not": f"isbirligi_izi={iz_sayisi}",
-            "_ilk_metin": ilk_bizim["metin"],
+            "_biz_basladik": biz_basladik,
+            "_ilk_metin": acilis or ilk_bizim["metin"],
+            "_gun": ilk_bizim["zaman"].weekday(),
+            "_saat": ilk_bizim["zaman"].hour,
             "_iz": iz_sayisi,
         })
     return {"ben": ben, "kayitlar": kayitlar, "sohbetler": sohbetler}
@@ -138,35 +287,58 @@ def _kelimeler(metin):
     return [k for k in re.findall(r"[a-zçğıöşü]{4,}", ortak.kucuk(metin)) if k not in _DURAK]
 
 
+def _sablon_imzalari(kayitlar, benzerlik=0.5):
+    """
+    Her açılış mesajını bir şablon ailesine atar. Şablonlar çoğu zaman aynı
+    dakikada atılan 3-4 balondur, export'ta sıraları karışır ve içine isim gibi
+    kişisel kelimeler girer. Yöntem: kişisel (nadir) kelimeler atılır, kalan
+    kelime kümesi mevcut ailelerin temsilcisiyle Jaccard benzerliğine göre
+    eşleştirilir; yeterince benzeyen yoksa yeni aile açılır.
+    """
+    kelimeler = [set(re.findall(r"[a-zçğıöşü]{6,}", ortak.kucuk(k["_ilk_metin"])))
+                 for k in kayitlar]
+    sıklık = Counter(w for kume in kelimeler for w in kume)
+    esik = max(3, len(kayitlar) // 100)          # %1'den az geçen kelime kişiseldir
+    temsilciler = []                              # [(aile_no, kelime kümesi)]
+    imzalar = []
+    for kume in kelimeler:
+        kume = {w for w in kume if sıklık[w] >= esik}
+        en_iyi, en_iyi_j = None, 0.0
+        for no, temsilci in temsilciler:
+            birlesim = len(kume | temsilci)
+            j = len(kume & temsilci) / birlesim if birlesim else 0.0
+            if j > en_iyi_j:
+                en_iyi, en_iyi_j = no, j
+        if en_iyi is None or en_iyi_j < benzerlik:
+            en_iyi = len(temsilciler)
+            temsilciler.append((en_iyi, kume))
+        imzalar.append(en_iyi)
+    return imzalar
+
+
 def rapor_uret(sonuc):
-    """Cevap oranı, aylık dağılım ve açılış cümlesi analizini metin olarak üret."""
+    """Cevap oranı, aylık dağılım ve açılış şablonu analizini metin olarak üret."""
     kayitlar = sonuc["kayitlar"]
     if not kayitlar:
         return "DM export'unda bizim yazdığımız sohbet bulunamadı."
 
-    toplam = len(kayitlar)
-    cevaplı = [k for k in kayitlar if k["cevap_verdi"] == "evet"]
-    isbirligi = [k for k in kayitlar if k["_iz"] >= 3]
+    giden = [k for k in kayitlar if k.get("_biz_basladik", True)]
+    gelen = [k for k in kayitlar if not k.get("_biz_basladik", True)]
+    cevaplı = [k for k in giden if k["cevap_verdi"] == "evet"]
+    isbirligi = [k for k in kayitlar if k["_iz"] >= 2]
 
-    # açılış mesajı uzunluğu ↔ cevap oranı
-    kisa = [k for k in kayitlar if len(k["_ilk_metin"]) < 300]
-    uzun = [k for k in kayitlar if len(k["_ilk_metin"]) >= 300]
+    def oran(grup):
+        return 100 * sum(1 for k in grup if k["cevap_verdi"] == "evet") / max(1, len(grup))
 
-    # kelime bazlı cevap oranı (en az 5 kez geçen kelimeler)
-    gecti, cevapladi = Counter(), Counter()
-    for k in kayitlar:
-        for kelime in set(_kelimeler(k["_ilk_metin"])):
-            gecti[kelime] += 1
-            if k["cevap_verdi"] == "evet":
-                cevapladi[kelime] += 1
-    kelime_orani = sorted(
-        ((kelime, cevapladi[kelime] / n, n) for kelime, n in gecti.items() if n >= 5),
-        key=lambda t: (-t[1], -t[2]),
-    )
+    # şablon aileleri (yalnızca bizim başlattığımız sohbetler)
+    aileler = defaultdict(list)
+    for k, imza in zip(giden, _sablon_imzalari(giden)):
+        aileler[imza].append(k)
+    aile_sirali = sorted(aileler.items(), key=lambda t: -len(t[1]))
 
-    # aylık dağılım
+    # aylık dağılım (giden)
     aylik = defaultdict(lambda: [0, 0])
-    for k in kayitlar:
+    for k in giden:
         ay = k["ilk_mesaj"][:7]
         aylik[ay][0] += 1
         aylik[ay][1] += 1 if k["cevap_verdi"] == "evet" else 0
@@ -175,33 +347,53 @@ def rapor_uret(sonuc):
     ek = sat.append
     ek("# DM geçmişi analizi\n")
     ek(f"- Hesabımız (export'ta görünen ad): **{sonuc['ben']}**")
-    ek(f"- Mesaj attığımız kişi sayısı: **{toplam}**")
-    ek(f"- Cevap veren: **{len(cevaplı)}** (%{100 * len(cevaplı) / toplam:.1f})")
-    ek(f"- İşbirliği izi güçlü sohbet (kargo/adres/paylaştım geçen): **{len(isbirligi)}**"
-       f" (%{100 * len(isbirligi) / toplam:.1f})\n")
+    ek(f"- Bizim yazdığımız (giden) sohbet: **{len(giden)}** · cevap veren: **{len(cevaplı)}**"
+       f" (%{oran(giden):.1f})")
+    ek(f"- Bize ilk yazan (gelen) sohbet: **{len(gelen)}** — bunlar keşif istatistiğine dahil değil")
+    ek(f"- Karşı tarafın yazdıklarında işbirliği izi (kargo/adres/paylaştım…): "
+       f"**{len(isbirligi)}** sohbet\n")
 
-    ek("## Açılış mesajı uzunluğu")
-    for etiket, grup in (("< 300 karakter", kisa), ("≥ 300 karakter", uzun)):
-        if grup:
-            oran = 100 * sum(1 for k in grup if k["cevap_verdi"] == "evet") / len(grup)
-            ek(f"- {etiket}: {len(grup)} mesaj, cevap oranı %{oran:.1f}")
+    ek("## Açılış şablonları — hangisi cevap alıyor?")
+    ek("Aynı şablonla yazılan sohbetler gruplandı (isim/selam kısmı atılarak).\n")
+    ek("| # | kaç kişiye | cevap oranı | şablon (örnek) |")
+    ek("|---|---|---|---|")
+    for i, (imza, grup) in enumerate(aile_sirali[:12], 1):
+        if len(grup) < 10:
+            break
+        ornek = re.sub(r"\s+", " ", grup[0]["_ilk_metin"])[:140]
+        ek(f"| {i} | {len(grup)} | %{oran(grup):.0f} | {ornek}… |")
     ek("")
 
-    if kelime_orani:
-        ek("## İlk mesajda geçtiğinde cevap oranı en yüksek kelimeler")
-        ek("| kelime | cevap oranı | kaç mesajda |")
-        ek("|---|---|---|")
-        for kelime, oran, n in kelime_orani[:15]:
-            ek(f"| {kelime} | %{100 * oran:.0f} | {n} |")
-        ek("")
-        ek("## En düşük cevap oranlı kelimeler (bunlardan kaçın)")
-        ek("| kelime | cevap oranı | kaç mesajda |")
-        ek("|---|---|---|")
-        for kelime, oran, n in kelime_orani[-8:]:
-            ek(f"| {kelime} | %{100 * oran:.0f} | {n} |")
-        ek("")
+    kisa = [k for k in giden if len(k["_ilk_metin"]) < 300]
+    uzun = [k for k in giden if len(k["_ilk_metin"]) >= 300]
+    ek("## Açılış uzunluğu (giden)")
+    for etiket, grup in (("< 300 karakter", kisa), ("≥ 300 karakter", uzun)):
+        if grup:
+            ek(f"- {etiket}: {len(grup)} sohbet, cevap oranı %{oran(grup):.1f}")
+    ek("")
 
-    ek("## Aylara göre")
+    gunler = ["Pzt", "Sal", "Çar", "Per", "Cum", "Cmt", "Paz"]
+    gun_dagilim = defaultdict(list)
+    saat_dagilim = defaultdict(list)
+    for k in giden:
+        if "_gun" in k:
+            gun_dagilim[k["_gun"]].append(k)
+            saat_dagilim[k["_saat"] // 3].append(k)   # 3 saatlik dilimler
+    ek("## Haftanın günü / saat dilimi (giden)")
+    ek("Saatler export'ta yazdığı gibidir (Instagram genelde UTC verir; Türkiye için +3 düşün).\n")
+    ek("| gün | yazılan | cevap oranı |")
+    ek("|---|---|---|")
+    for g in range(7):
+        if gun_dagilim[g]:
+            ek(f"| {gunler[g]} | {len(gun_dagilim[g])} | %{oran(gun_dagilim[g]):.0f} |")
+    ek("")
+    ek("| saat dilimi | yazılan | cevap oranı |")
+    ek("|---|---|---|")
+    for d in range(8):
+        if saat_dagilim[d]:
+            ek(f"| {d * 3:02d}:00–{d * 3 + 3:02d}:00 | {len(saat_dagilim[d])} | %{oran(saat_dagilim[d]):.0f} |")
+    ek("")
+    ek("## Aylara göre (giden)")
     ek("| ay | yazılan | cevap | oran |")
     ek("|---|---|---|---|")
     for ay in sorted(aylik):
@@ -209,7 +401,8 @@ def rapor_uret(sonuc):
         ek(f"| {ay} | {n} | {c} | %{100 * c / n:.0f} |")
     ek("")
     ek("## İşbirliğine dönmüş görünen sohbetler (ortaklar.txt'ye eklemeye aday)")
-    for k in sorted(isbirligi, key=lambda k: -k["_iz"])[:40]:
+    ek("Karşı taraf kargo/adres/paylaştım/story gibi ifadeler kullanmış. iz = kaç farklı ifade.\n")
+    for k in sorted(isbirligi, key=lambda k: (-k["_iz"], k["ilk_mesaj"]))[:80]:
         ek(f"- @{k['kullanici_adi']} — {k['ad']} ({k['ilk_mesaj']}, iz={k['_iz']})")
     return "\n".join(sat)
 

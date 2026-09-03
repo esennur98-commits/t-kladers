@@ -46,7 +46,7 @@ dışlanmıştır. Başka bir klasör istersen: `export KESIF_VERI=/yol/veri`.
 ### 1) DM geçmişini içe aktar (bir kere, sonra ayda bir)
 
 Instagram → Ayarlar → Hesaplar merkezi → Bilgileriniz ve izinleriniz →
-Bilgilerini indir → **JSON** biçimi, "Mesajlar" seçili. Zip gelince aç:
+Bilgilerini indir → **JSON (HTML de olur, araç ikisini de okur)** biçimi, "Mesajlar" seçili. Zip gelince aç:
 
 ```bash
 python3 -m kesif dm-analiz ~/Downloads/instagram-tikladers-2026-09-02

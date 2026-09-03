@@ -120,5 +120,38 @@ class Akis(unittest.TestCase):
         self.assertIn("elif.evdeoyun", ortak.satirlar(ortak.veri_yolu("ortaklar.txt")))
 
 
+
+
+class HtmlExport(unittest.TestCase):
+    """Instagram'ın HTML biçimli export'u da okunmalı."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        os.environ["KESIF_VERI"] = self.tmp
+        ortak.VERI = self.tmp
+        self.sonuc = dm_gecmisi.analiz_et(os.path.join(ORNEK, "export_html"))
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_html_sohbetler_okunur(self):
+        k = {r["kullanici_adi"]: r for r in self.sonuc["kayitlar"]}
+        self.assertEqual(self.sonuc["ben"], "tikladers")
+        self.assertIn("aysenur.etkinlik", k, "başlık kullanıcı adıysa noktalı hali korunmalı")
+        self.assertIn("melisanne", k, "görünen ad kullanıcı adı değilse klasör adı kullanılmalı")
+        a = k["aysenur.etkinlik"]
+        self.assertEqual(a["cevap_verdi"], "evet")
+        self.assertEqual(a["ilk_mesaj"], "2026-06-10", "Türkçe ay kısaltması + am/pm çözülmeli")
+        self.assertGreaterEqual(a["_iz"], 2, "kargo/story ifadeleri işbirliği izi saymalı")
+        self.assertTrue(a["_biz_basladik"])
+        self.assertEqual(k["melisanne"]["cevap_verdi"], "hayır")
+
+    def test_reklam_yaniti_gelen_sayilir(self):
+        k = {r["kullanici_adi"]: r for r in self.sonuc["kayitlar"]}
+        self.assertIn("reklam", k)
+        self.assertFalse(k["reklam"]["_biz_basladik"])
+        self.assertEqual(k["reklam"]["kaynak"], "gelen_kutusu")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
