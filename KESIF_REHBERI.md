@@ -203,3 +203,5 @@ ornek/                  örnek export + örnek havuz (test/deneme için)
 testler/test_akis.py    uçtan uca test (API'siz)
 veri/                   SENİN verin — repoya girmez (.gitignore)
 ```
+
+> **Önemli:** Instagram'ın HTML export'u sohbet klasörlerini kullanıcı adıyla değil **görünen adla** adlandırır. Araç bu yüzden elemeyi hem kullanıcı adına hem görünen ada göre yapar; görünen adı geçmişteki biriyle birebir eşleşen aday 'daha önce yazıldı' sayılır, tek kelimelik yaygın adlar (Merve, Eda…) ise uyarıyla geçer.

@@ -146,6 +146,21 @@ class HtmlExport(unittest.TestCase):
         self.assertTrue(a["_biz_basladik"])
         self.assertEqual(k["melisanne"]["cevap_verdi"], "hayır")
 
+    def test_gorunen_ad_ile_eleme(self):
+        """HTML export klasörleri görünen adla adlandırılır; kullanıcı adı
+        farklı olsa bile görünen adı eşleşen aday 'daha önce yazıldı' sayılmalı."""
+        dm_gecmisi.ice_aktar(os.path.join(ORNEK, "export_html"))
+        adaylar = [
+            {"kullanici_adi": "melisin.dunyasi", "ad": "Melis Anne", "takipci": 20000,
+             "etkilesim_orani": 3, "biyografi": "anne etkinlik", "son_paylasim": ortak.bugun()},
+            {"kullanici_adi": "yepyeni.anne", "ad": "Yepyeni Bir Anne", "takipci": 20000,
+             "etkilesim_orani": 3, "biyografi": "anne etkinlik", "son_paylasim": ortak.bugun()},
+        ]
+        sonuc = {a["kullanici_adi"]: a for a in puan.havuzu_puanla(adaylar)}
+        self.assertEqual(sonuc["melisin.dunyasi"]["durum"], "elendi")
+        self.assertIn("görünen ad", sonuc["melisin.dunyasi"]["not"])
+        self.assertNotEqual(sonuc["yepyeni.anne"]["durum"], "elendi")
+
     def test_reklam_yaniti_gelen_sayilir(self):
         k = {r["kullanici_adi"]: r for r in self.sonuc["kayitlar"]}
         self.assertIn("reklam", k)

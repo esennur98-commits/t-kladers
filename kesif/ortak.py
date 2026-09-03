@@ -164,6 +164,42 @@ def gecmis_yaz(kayitlar):
     return csv_yaz(veri_yolu("iletisim_gecmisi.csv"), kayitlar, GECMIS_ALANLARI)
 
 
+def ad_normalize(s):
+    """Görünen adı karşılaştırma için sadeleştir: küçük harf, emoji/noktalama yok."""
+    s = kucuk(s)
+    s = re.sub(r"[^a-z0-9çğıöşü ]", " ", s)
+    return " ".join(s.split())
+
+
+def ad_katla(s):
+    """Görünen adı en kaba biçime indirger: süslü unicode ve aksan atılır,
+    boşluk/noktalama silinir ('𝐆𝐨̈𝐤𝐭𝐮𝐠 | Oyun' → 'goktugoyun')."""
+    import unicodedata
+    s = unicodedata.normalize("NFKD", kucuk(s or ""))
+    s = "".join(c for c in s if not unicodedata.combining(c))
+    s = s.replace("ı", "i").replace("ğ", "g").replace("ş", "s").replace("ç", "c").replace("ö", "o").replace("ü", "u")
+    return re.sub(r"[^a-z0-9]", "", s)
+
+
+def dokunulmaz_adlar():
+    """
+    Daha önce yazdıklarımızın GÖRÜNEN adları. Instagram'ın HTML export'u
+    sohbetleri kullanıcı adıyla değil görünen adla adlandırır; bu yüzden
+    eleme yalnızca kullanıcı adına bakarsa yazılmış kişiler yeniden listeye
+    girer. Tek kelimelik yaygın adlar (Merve, Eda…) belirsizdir; onlar ayrı
+    kümede döner.
+    """
+    kesin, belirsiz = set(), set()
+    for k in gecmis_oku():
+        ad = ad_normalize(k.get("ad", ""))
+        if not ad:
+            continue
+        hedef = kesin if len(ad.split()) >= 2 or len(ad) >= 9 else belirsiz
+        hedef.add(ad)
+        hedef.add(ad_katla(k.get("ad", "")))
+    return kesin, belirsiz
+
+
 def dokunulmaz_kumesi():
     """
     Bir daha mesaj atılmayacak / havuza girmeyecek kullanıcılar:

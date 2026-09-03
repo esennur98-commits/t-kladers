@@ -181,6 +181,8 @@ def havuzu_puanla(kayitlar, kriter=None, ideal=None, gecmis=None):
     k = kriter or ortak.kriterler()
     ideal = ideal if ideal is not None else ideal_profil_oku()
     gecmis = gecmis if gecmis is not None else ortak.dokunulmaz_kumesi()
+    gecmis_duz = {u.replace(".", "").replace("_", "") for u in gecmis}
+    kesin_ad, belirsiz_ad = ortak.dokunulmaz_adlar()
     sonuc = []
     for aday in kayitlar:
         aday = dict(aday)
@@ -193,12 +195,22 @@ def havuzu_puanla(kayitlar, kriter=None, ideal=None, gecmis=None):
         if aday.get("durum") in ("mesaj_atildi", "ortak_video"):
             sonuc.append(aday)
             continue
-        if kullanici in gecmis:
+        # Geçmişle eşleme: kullanıcı adı (noktalı/noktasız) VE görünen ad.
+        # Instagram'ın HTML export'u sohbetleri görünen adla adlandırdığı için
+        # yalnızca kullanıcı adına bakmak yazılmış kişileri kaçırır.
+        ad = ortak.ad_normalize(aday.get("ad", ""))
+        ad_k = ortak.ad_katla(aday.get("ad", ""))
+        ad_eslesti = bool(ad) and (ad in kesin_ad or (len(ad_k) >= 9 and ad_k in kesin_ad))
+        if kullanici in gecmis or kullanici.replace(".", "").replace("_", "") in gecmis_duz or ad_eslesti:
             aday["durum"] = "elendi"
-            aday["not"] = "daha önce mesaj attık / ortak çalıştık"
+            aday["not"] = ("daha önce mesaj attık (görünen ad eşleşti: %s)" % aday.get("ad", "")[:30]
+                           if ad_eslesti else "daha önce mesaj attık / ortak çalıştık")
+            aday["_eleme"] = [aday["not"]]
             aday["puan"] = ""
             sonuc.append(aday)
             continue
+        if ad and (ad in belirsiz_ad or ad_k in belirsiz_ad):
+            aday["_gerekce"].append("dikkat: '%s' adlı birine yazılmış, aynı kişi olabilir" % aday.get("ad", "")[:20])
         # Verisi çekilmemiş kayıt: puanlama anlamsız, zenginleştirme bekler
         if not ortak.sayi(aday.get("takipci")):
             aday["puan"] = ""
@@ -211,7 +223,7 @@ def havuzu_puanla(kayitlar, kriter=None, ideal=None, gecmis=None):
         puan, bilesen, gerekce, eleme = puanla(aday, k, ideal)
         aday["puan"] = puan
         aday["_bilesen"] = bilesen
-        aday["_gerekce"] = gerekce
+        aday["_gerekce"] = aday["_gerekce"] + gerekce
         aday["_eleme"] = eleme
         if eleme:
             aday["durum"] = "elendi"
